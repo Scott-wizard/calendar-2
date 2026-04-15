@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8' />
+    <link href='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.9/index.global.min.css' rel='stylesheet' />
+    <script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.9/index.global.min.js'></script>
+    <script src='https://cdn.jsdelivr.net/npm/@fullcalendar/core@6.1.9/index.global.min.js'></script>
+    <script src='https://cdn.jsdelivr.net/npm/@fullcalendar/daygrid@6.1.9/index.global.min.js'></script>
+    <script src='https://cdn.jsdelivr.net/npm/@fullcalendar/timegrid@6.1.9/index.global.min.js'></script>
+    <script src='https://cdn.jsdelivr.net/npm/@fullcalendar/list@6.1.9/index.global.min.js'></script>
+    <style>
+        body { margin: 40px; font-family: Arial; }
+        #calendar { max-width: 1100px; margin: 0 auto; }
+        .notification-btn {
+            margin: 10px 0;
+            padding: 8px 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .notification-btn:hover {
+            background-color: #45a049;
+        }
+        <div style="margin: 10px 0; padding: 10px; background: #f0f0f0; border-radius: 5px;">
+    Всего задач в общем календаре: <span id="taskCounter">...</span>
+    <button onclick="location.reload()" style="margin-left: 10px;">Обновить</button>
+</div>
+    </style>
+</head>
+<body>
+    <h1>Мероприятия ТюмГУ</h1>
+
+    <button class="notification-btn" onclick="requestNotificationPermission()">
+         Включить уведомления
+    </button>
+
+    <div id='calendar'></div>
+
+    <script>
+        function requestNotificationPermission() {
+            if (!("Notification" in window)) {
+                alert("Ваш браузер не поддерживает уведомления");
+                return;
+            }
+
+            if (Notification.permission === "granted") {
+                alert("Уведомления уже включены!");
+            } else if (Notification.permission !== "denied") {
+                Notification.requestPermission().then(function(permission) {
+                    if (permission === "granted") {
+                        alert("Уведомления включены! Теперь вы будете получать напоминания о задачах.");
+                        new Notification("Календарь", {
+                            body: "Уведомления успешно настроены!",
+                            icon: "https://cdn.jsdelivr.net/npm/fullcalendar@6.1.9/favicon.ico"
+                        });
+                    } else {
+                        alert("Уведомления отклонены. Вы можете включить их позже в настройках браузера.");
+                    }
+                });
+            }
+        }
+
+        function scheduleNotification(title, startTime) {
+            if (Notification.permission !== "granted") {
+                console.log("Уведомления не включены");
+                return;
+            }
+
+            let taskTime = new Date(startTime).getTime();
+            let currentTime = new Date().getTime();
+            let timeDiff = taskTime - currentTime;
+
+            if (timeDiff > 0) {
+                console.log(`Уведомление для "${title}" будет через ${Math.round(timeDiff/1000/60)} минут`);
+
+                setTimeout(function() {
+                    new Notification("Напоминание о задаче", {
+                        body: "Пора: " + title,
+                        icon: "https://cdn.jsdelivr.net/npm/fullcalendar@6.1.9/favicon.ico",
+                        requireInteraction: true
+                    });
+                }, timeDiff);
+            } else if (timeDiff > -60000) {
+                new Notification("Напоминание о задаче", {
+                    body: "Прямо сейчас: " + title,
+                    icon: "https://cdn.jsdelivr.net/npm/fullcalendar@6.1.9/favicon.ico",
+                    requireInteraction: true
+                });
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            var calendarEl = document.getElementById('calendar');
+            var calendar = new FullCalendar.Calendar(calendarEl, {
+                initialView: 'dayGridMonth',
+                headerToolbar: {
+                    left: 'prev,next today',
+                    center: 'title',
+                    right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek'
+                },
+                locale: 'ru',
+                events: '/api/events',
+                selectable: true,
+
+                select: function(info) {
+                    let title = prompt('Название задачи:');
+                    if (title) {
+                        let eventData = {
+                            title: title,
+                            start: info.startStr,
+                            end: info.endStr
+                        };
+
+                        fetch('/api/events', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(eventData)
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            calendar.addEvent(eventData);
+                            scheduleNotification(title, info.startStr);
+
+                            if (Notification.permission === "granted") {
+                                new Notification("Задача создана", {
+                                    body: title + " на " + new Date(info.startStr).toLocaleString('ru'),
+                                    icon: "https://cdn.jsdelivr.net/npm/fullcalendar@6.1.9/favicon.ico"
+                                });
+                            }
+                        })
+                        .catch(error => {
+                            alert('Ошибка сервера! Проверьте, запущен ли сервер.');
+                            console.error('Ошибка:', error);
+                        });
+                    }
+                    calendar.unselect();
+                },
+
+                eventClick: function(info) {
+                    if (confirm('Удалить задачу "' + info.event.title + '"?')) {
+                        info.event.remove();
+
+                        if (Notification.permission === "granted") {
+                            new Notification("Задача удалена", {
+                                body: info.event.title,
+                                icon: "https://cdn.jsdelivr.net/npm/fullcalendar@6.1.9/favicon.ico"
+                            });
+                        }
+                    }
+                },
+
+                eventsSet: function(events) {
+                    if (Notification.permission === "granted") {
+                        events.forEach(function(event) {
+                            scheduleNotification(event.title, event.startStr);
+                        });
+                    }
+                }
+            });
+
+            calendar.render();
+
+            setTimeout(function() {
+                if (Notification.permission === "default") {
+                    console.log("Запросите разрешение на уведомления кнопкой выше");
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html>
